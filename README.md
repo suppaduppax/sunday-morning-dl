@@ -6,7 +6,7 @@ Automatically download the latest episode of [CBS Sunday Morning](https://www.cb
 Create a `plex-token.txt` file and place the Plex API token inside it
 
 ### Discord Webhook
-Create a `discord-webhook.txt` file and place the web hook inside it
+Create a `discord-webhook.txt` file and place the webhook inside it
 
 ### Install yt-dlp
 ```bash
