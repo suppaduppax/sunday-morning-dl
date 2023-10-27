@@ -1,46 +1,5 @@
 #!/bin/bash
-rotate_logs() {
-    for (( i=$((MAX_LOG_FILES-2)); i>=1; i-- )); do
-        cur_log_file="${LOG_DIR}/${LOG_FILE}.${i}"
-        if [ -f "${cur_log_file}" ]; then
-            mv "${cur_log_file}" "${LOG_DIR}/${LOG_FILE}.$((i+1))"
-        fi
-    done
-
-    # move the curretn log file to *.1
-    if [ -f "${LOG_DIR}/${LOG_FILE}" ]; then
-        mv "${LOG_DIR}/${LOG_FILE}" "${LOG_DIR}/${LOG_FILE}.1"
-    fi
-}
-
-to_timestamp() {
-    date --date="${1}" +%s;
-}
-
-
-debug() {
-    if [ "${1}" -eq "${DEBUG_LEVEL_DEBUG}" ]; then
-        debug_tag="DEBUG"
-    else
-        debug_tag="INFO"
-    fi
-
-    if [ "${1}" -le ${OPT_DEBUG} ]; then
-        echo "${2}"
-        echo "[$debug_tag] [$(date +%m-%d-%y_%H:%M:%S)] ${2}" >> "${LOG_DIR}/${LOG_FILE}"
-    fi
-}
-
-discord_msg() {
-    curl -s -o /dev/null -F "payload_json={\"username\": \"Sunday Morning Bot\", \"content\": \"${1}\"}" "${DISCORD_WEBHOOK}"
-}
-
-discord_file() {
-    curl -s -o /dev/null -F "file1=@${1}" -F "payload_json={\"username\": \"Sunday Morning Bot\", \"content\": \"${2}\"}" "${DISCORD_WEBHOOK}"
-}
-
-usage() {
-echo "CBS Sunday Morning Automated Downloader
+USAGE="CBS Sunday Morning Automated Downloader
 ---------------------------------------
 USAGE: ./cbs-sunday-morning-dl.sh [OPTIONS]
 
@@ -56,80 +15,14 @@ Options:
 
 For best results, add this script to crontab using: ./crontab.sh
 
-See https://github.com/suppaduppax/sunday-morning-dl for more information.
-"
-}
-
-LOG_FILE="log.txt"
-LOG_DIR="logs"
-MAX_LOG_FILES=25
-
-rotate_logs
-
-log_files=(./${LOG_DIR}/${LOG_FILE}*)
-
-if [ ${#log_files[@]} -ge $MAX_LOG_FILES ]; then
-    rotate_logs
-fi
-
-echo '' > "${LOG_DIR}/${LOG_FILE}"
-
-# flag used to only print text and will skip any processing/downloading for opts such as --plex-library-id which will show the id number for the tv shows library and will skip download
-QUERY_FLAG=0
-
-OPT_DEBUG=0
-OPT_SEND_LOG=0
-OPT_DRY_RUN=0
-OPT_REFRESH_METADATA=0
-VALID_ARGS=$(getopt -o hlirdv --long help,send-log,plex-library-id,force-refresh-metadata,dry-run,debug -- "$@")
+See https://github.com/suppaduppax/sunday-morning-dl for more information."
 
 DEBUG_LEVEL_INFO=0
 DEBUG_LEVEL_DEBUG=1
 
-if [[ $? -ne 0 ]]; then
-    exit 1;w
-fi
-
-eval set -- "$VALID_ARGS"
-while [ : ]; do
-  case "${1}" in
-    -i | --plex-library-id)
-        shift
-        debug ${DEBUG_LEVEL_INFO} "Querying plex server for '${PLEX_LIBRARY_NAME}'"
-        debug 'id: $(curl -sX GET "${PLEX_SERVER_URL}/library/sections/?X-Plex-Token=${PLEX_TOKEN}" | grep "${PLEX_LIBRARY_NAME}" | grep -oP 'key="[0-9]+"' | grep -oP '".+"' | tr -d "\"")'
-        QUERY_FLAG=1
-        ;;
-    -l | --send-log)
-        shift
-        OPT_SEND_LOG=1
-        ;;
-    -r | --force-refresh-metadata)
-        OPT_REFRESH_METADATA=1
-        shift
-        ;;
-    -d | --dry-run)
-        OPT_DRY_RUN=1
-        shift
-        ;;
-    -v | --debug)
-        OPT_DEBUG=1
-        shift;
-        ;;
-    -h | --help)
-        shift;
-        usage
-        exit
-        ;;
-    --) shift;
-        break
-        ;;
-  esac
-done
-
-rotate_logs() {
-    logs=$(./logs/*)
-    echo "$logs"
-}
+LOG_FILE="log.txt"
+LOG_DIR="logs"
+MAX_LOG_FILES=25
 
 SERIES_NAME="CBS Sunday Morning With Jane Pauley"
 SERIES_URL="https://www.cbsnews.com/sunday-morning/"
@@ -148,24 +41,58 @@ TVDB_URL="https://thetvdb.com/series/cbs-news-sunday-morning#seasons"
 
 VIDEO_FORMAT="mp4"
 
-#--------------------
+# flag used to only print text and will skip any processing/downloading for opts such as --plex-library-id which will show the id number for the tv shows library and will skip download
+QUERY_FLAG=0
 
-# Grabs the url to the full episode
-# returns https://www.cbsnews.com/video/sunday-morning-full-episode-10-22-2023/
-debug ${DEBUG_LEVEL_INFO} "Scraping for episode url from: '${SERIES_URL}'"
-episode_url="$(curl -s ${SERIES_URL} | grep -oP 'https://www.cbsnews.com/video/sunday-morning-full.*/')"
-episode_date_dashes="$(echo ${episode_url} |  grep -oP '[0-9][0-9][-][0-9][0-9][-][0-9][0-9][0-9][0-9]')"
-episode_date_slashes="${episode_date_dashes//-/\/}"
-episode_timestamp="$(to_timestamp $episode_date_slashes)"
+OPT_DEBUG=0
+OPT_SEND_LOG=0
+OPT_DRY_RUN=0
+OPT_REFRESH_METADATA=0
 
-debug ${DEBUG_LEVEL_INFO} "Found full episode url: '${episode_url}'"
-debug ${DEBUG_LEVEL_DEBUG} "Finding match for date: '${episode_date_dashes}'"
-debug ${DEBUG_LEVEL_DEBUG} "Episode timetamp: '${episode_timestamp}'"
+VALID_ARGS=$(getopt -o hlirdv --long help,send-log,plex-library-id,force-refresh-metadata,dry-run,debug -- "$@")
+if [[ $? -ne 0 ]]; then
+    exit 1;
+fi
 
-# -----------------------
+debug () {
+    if [ "${1}" -eq "${DEBUG_LEVEL_DEBUG}" ]; then
+        debug_tag="DEBUG"
+    else
+        debug_tag="INFO"
+    fi
 
-#cr=1
-#ac=""
+    if [ "${1}" -le ${OPT_DEBUG} ]; then
+        echo "${2}"
+        echo "[$debug_tag] [$(date +%m-%d-%y_%H:%M:%S)] ${2}" >> "${LOG_DIR}/${LOG_FILE}"
+    fi
+}
+
+rotate_logs () {
+    for (( i=$((MAX_LOG_FILES-2)); i>=1; i-- )); do
+        cur_log_file="${LOG_DIR}/${LOG_FILE}.${i}"
+        if [ -f "${cur_log_file}" ]; then
+            mv "${cur_log_file}" "${LOG_DIR}/${LOG_FILE}.$((i+1))"
+        fi
+    done
+
+    # move the curretn log file to *.1
+    if [ -f "${LOG_DIR}/${LOG_FILE}" ]; then
+        mv "${LOG_DIR}/${LOG_FILE}" "${LOG_DIR}/${LOG_FILE}.1"
+    fi
+}
+
+to_timestamp () {
+    date --date="${1}" +%s;
+}
+
+discord_msg () {
+    curl -s -o /dev/null -F "payload_json={\"username\": \"Sunday Morning Bot\", \"content\": \"${1}\"}" "${DISCORD_WEBHOOK}"
+}
+
+discord_file () {
+    curl -s -o /dev/null -F "file1=@${1}" -F "payload_json={\"username\": \"Sunday Morning Bot\", \"content\": \"${2}\"}" "${DISCORD_WEBHOOK}"
+}
+
 read_dom () {
     local IFS=\>
     read -d \< ENTITY CONTENT
@@ -287,6 +214,60 @@ parse_season () {
         fi
     fi
 }
+
+log_files=(./${LOG_DIR}/${LOG_FILE}*)
+if [ ${#log_files[@]} -ge $MAX_LOG_FILES ]; then
+    rotate_logs
+fi
+echo '' > "${LOG_DIR}/${LOG_FILE}"
+
+eval set -- "$VALID_ARGS"
+while [ : ]; do
+  case "${1}" in
+    -i | --plex-library-id)
+        shift
+        debug ${DEBUG_LEVEL_INFO} "Querying plex server for '${PLEX_LIBRARY_NAME}'"
+        debug 'id: $(curl -sX GET "${PLEX_SERVER_URL}/library/sections/?X-Plex-Token=${PLEX_TOKEN}" | grep "${PLEX_LIBRARY_NAME}" | grep -oP 'key="[0-9]+"' | grep -oP '".+"' | tr -d "\"")'
+        QUERY_FLAG=1
+        ;;
+    -l | --send-log)
+        shift
+        OPT_SEND_LOG=1
+        ;;
+    -r | --force-refresh-metadata)
+        OPT_REFRESH_METADATA=1
+        shift
+        ;;
+    -d | --dry-run)
+        OPT_DRY_RUN=1
+        shift
+        ;;
+    -v | --debug)
+        OPT_DEBUG=1
+        shift;
+        ;;
+    -h | --help)
+        shift;
+        echo "${USAGE}"
+        exit
+        ;;
+    --) shift;
+        break
+        ;;
+  esac
+done
+
+# Grabs the url to the full episode
+# returns https://www.cbsnews.com/video/sunday-morning-full-episode-10-22-2023/
+debug ${DEBUG_LEVEL_INFO} "Scraping for episode url from: '${SERIES_URL}'"
+episode_url="$(curl -s ${SERIES_URL} | grep -oP 'https://www.cbsnews.com/video/sunday-morning-full.*/')"
+episode_date_dashes="$(echo ${episode_url} |  grep -oP '[0-9][0-9][-][0-9][0-9][-][0-9][0-9][0-9][0-9]')"
+episode_date_slashes="${episode_date_dashes//-/\/}"
+episode_timestamp="$(to_timestamp $episode_date_slashes)"
+
+debug ${DEBUG_LEVEL_INFO} "Found full episode url: '${episode_url}'"
+debug ${DEBUG_LEVEL_DEBUG} "Finding match for date: '${episode_date_dashes}'"
+debug ${DEBUG_LEVEL_DEBUG} "Episode timetamp: '${episode_timestamp}'"
 
 if [ "${QUERY_FLAG}" -ne 1 ]; then
     debug ${DEBUG_LEVEL_INFO} "Attempting to scrape TVDB to match season/episode with episode's date..."
