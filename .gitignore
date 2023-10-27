@@ -1,1 +1,3 @@
-plex-token.txt
+*.txt
+logs/
+*test*
