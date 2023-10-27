@@ -13,10 +13,10 @@ rotate_logs() {
     fi
 }
 
-
 to_timestamp() {
     date --date="${1}" +%s;
 }
+
 
 debug() {
     if [ "${1}" -eq "${DEBUG_LEVEL_DEBUG}" ]; then
@@ -26,7 +26,7 @@ debug() {
     fi
 
     if [ "${1}" -le ${OPT_DEBUG} ]; then
-        echo "[$debug_tag] [$(date +%m-%d-%y_%H:%M:%S)] ${2}"
+        echo "${2}"
         echo "[$debug_tag] [$(date +%m-%d-%y_%H:%M:%S)] ${2}" >> "${LOG_DIR}/${LOG_FILE}"
     fi
 }
@@ -37,6 +37,27 @@ discord_msg() {
 
 discord_file() {
     curl -s -o /dev/null -F "file1=@${1}" -F "payload_json={\"username\": \"Sunday Morning Bot\", \"content\": \"${2}\"}" "${DISCORD_WEBHOOK}"
+}
+
+usage() {
+echo "CBS Sunday Morning Automated Downloader
+---------------------------------------
+USAGE: ./cbs-sunday-morning-dl.sh [OPTIONS]
+
+Options:
+  -d, --dry-run                  Execute script without downloading any
+                                 files
+  -h, --help                     Print this usage screen
+  -i, --plex-library-id          Query plex server for library id
+  -l, --send-log                 Send the log file to discord after
+                                 completion
+  -r, --force-refresh-metadata   Refresh metadata regardless of outcome
+  -v, --debug                    Enable verbose logging and output
+
+For best results, add this script to crontab using: ./crontab.sh
+
+See https://github.com/suppaduppax/sunday-morning-dl for more information.
+"
 }
 
 LOG_FILE="log.txt"
@@ -60,7 +81,7 @@ OPT_DEBUG=0
 OPT_SEND_LOG=0
 OPT_DRY_RUN=0
 OPT_REFRESH_METADATA=0
-VALID_ARGS=$(getopt -o lirdv --long send-log,plex-library-id,force-refresh-metadata,dry-run,debug -- "$@")
+VALID_ARGS=$(getopt -o hlirdv --long help,send-log,plex-library-id,force-refresh-metadata,dry-run,debug -- "$@")
 
 DEBUG_LEVEL_INFO=0
 DEBUG_LEVEL_DEBUG=1
@@ -94,6 +115,11 @@ while [ : ]; do
         OPT_DEBUG=1
         shift;
         ;;
+    -h | --help)
+        shift;
+        usage
+        exit
+        ;;
     --) shift;
         break
         ;;
@@ -108,7 +134,7 @@ rotate_logs() {
 SERIES_NAME="CBS Sunday Morning With Jane Pauley"
 SERIES_URL="https://www.cbsnews.com/sunday-morning/"
 
-DISCORD_WEBHOOK="$(cat discord_webhook.txt)"
+DISCORD_WEBHOOK="$(cat discord-webhook.txt)"
 
 PLEX_SERVER_URL="http://plex.home"
 PLEX_LIBRARY_ID=2
