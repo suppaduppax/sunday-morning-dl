@@ -215,12 +215,13 @@ parse_season () {
     fi
 }
 
+# prepare logging
+if [ ! -d "${LOG_DIR}" ]; then mkdir "${LOG_DIR}"; fi
 log_files=(./${LOG_DIR}/${LOG_FILE}*)
-if [ ${#log_files[@]} -ge $MAX_LOG_FILES ]; then
-    rotate_logs
-fi
-echo '' > "${LOG_DIR}/${LOG_FILE}"
+if [ ${#log_files[@]} -le $MAX_LOG_FILES ]; then rotate_logs; fi
+cat /dev/null >| "${LOG_DIR}/${LOG_FILE}"
 
+# getopts processing
 eval set -- "$VALID_ARGS"
 while [ : ]; do
   case "${1}" in
@@ -260,6 +261,7 @@ done
 # Grabs the url to the full episode
 # returns https://www.cbsnews.com/video/sunday-morning-full-episode-10-22-2023/
 debug ${DEBUG_LEVEL_INFO} "Scraping for episode url from: '${SERIES_URL}'"
+
 episode_url="$(curl -s ${SERIES_URL} | grep -oP 'https://www.cbsnews.com/video/sunday-morning-full.*/')"
 episode_date_dashes="$(echo ${episode_url} |  grep -oP '[0-9][0-9][-][0-9][0-9][-][0-9][0-9][0-9][0-9]')"
 episode_date_slashes="${episode_date_dashes//-/\/}"
@@ -272,6 +274,7 @@ debug ${DEBUG_LEVEL_DEBUG} "Episode timetamp: '${episode_timestamp}'"
 if [ "${QUERY_FLAG}" -ne 1 ]; then
     debug ${DEBUG_LEVEL_INFO} "Attempting to scrape TVDB to match season/episode with episode's date..."
     debug ${DEBUG_LEVEL_INFO} "Searching for season... "
+
     while read_dom; do
         parse_series
     done <<< "$(curl -s ${TVDB_URL})"
