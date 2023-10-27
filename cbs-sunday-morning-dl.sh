@@ -1,58 +1,97 @@
 #!/bin/bash
+rotate_logs() {
+    for (( i=$((MAX_LOG_FILES-2)); i>=1; i-- )); do
+        cur_log_file="${LOG_DIR}/${LOG_FILE}.${i}"
+        if [ -f "${cur_log_file}" ]; then
+            mv "${cur_log_file}" "${LOG_DIR}/${LOG_FILE}.$((i+1))"
+        fi
+    done
+
+    # move the curretn log file to *.1
+    if [ -f "${LOG_DIR}/${LOG_FILE}" ]; then
+        mv "${LOG_DIR}/${LOG_FILE}" "${LOG_DIR}/${LOG_FILE}.1"
+    fi
+}
+
+
 to_timestamp() {
     date --date="${1}" +%s;
 }
 
 debug() {
-    if [ "${DEBUG}" -eq 1 ]; then
-        echo "${1}"
+    if [ "${1}" -eq "${DEBUG_LEVEL_DEBUG}" ]; then
+        debug_tag="DEBUG"
+    else
+        debug_tag="INFO"
+    fi
+
+    if [ "${1}" -le ${OPT_DEBUG} ]; then
+        echo "[$debug_tag] [$(date +%m-%d-%y_%H:%M:%S)] ${2}"
+        echo "[$debug_tag] [$(date +%m-%d-%y_%H:%M:%S)] ${2}" >> "${LOG_DIR}/${LOG_FILE}"
     fi
 }
 
-DEBUG=0
+discord_msg() {
+    curl -s -o /dev/null -F "payload_json={\"username\": \"Sunday Morning Bot\", \"content\": \"${1}\"}" "${DISCORD_WEBHOOK}"
+}
 
-plex_server_url="http://plex.home"
-plex_tv_shows_library_id=2
-plex_tv_shows_library_name="TV Shows"
-plex_token_file="plex-token.txt"
+discord_file() {
+    curl -s -o /dev/null -F "file1=@${1}" -F "payload_json={\"username\": \"Sunday Morning Bot\", \"content\": \"${2}\"}" "${DISCORD_WEBHOOK}"
+}
 
-plex_token="$(cat $plex_token_file)"
-tv_path="/mnt/media/tv"
-tvdb_url="https://thetvdb.com/series/cbs-news-sunday-morning#seasons"
-series_name="CBS Sunday Morning With Jane Pauley"
-show_url="https://www.cbsnews.com/sunday-morning/"
+LOG_FILE="log.txt"
+LOG_DIR="logs"
+MAX_LOG_FILES=25
 
-echo="Grabbing url: ${show_url}"
-vid_url="$(curl -s ${show_url} | grep -oP 'https://www.cbsnews.com/video/sunday-morning-full.*/')"
-# returns https://www.cbsnews.com/video/sunday-morning-full-episode-10-22-2023/
-echo "Found vid url: $vid_url"
-vid_date_parse="$(echo ${vid_url} |  grep -oP '[0-9][0-9][-][0-9][0-9][-][0-9][0-9][0-9][0-9]')"
-echo "Finding match for date: ${vid_date_parse}"
-vid_date="${vid_date_parse//-/\/}"
-vid_timestamp="$(to_timestamp $vid_date)"
-vid_format="mp4"
+rotate_logs
 
-VALID_ARGS=$(getopt -o irv --long plex-library-id,force-refresh-metadata,debug -- "$@")
+log_files=(./${LOG_DIR}/${LOG_FILE}*)
+
+if [ ${#log_files[@]} -ge $MAX_LOG_FILES ]; then
+    rotate_logs
+fi
+
+echo '' > "${LOG_DIR}/${LOG_FILE}"
+
+# flag used to only print text and will skip any processing/downloading for opts such as --plex-library-id which will show the id number for the tv shows library and will skip download
+QUERY_FLAG=0
+
+OPT_DEBUG=0
+OPT_SEND_LOG=0
+OPT_DRY_RUN=0
+OPT_REFRESH_METADATA=0
+VALID_ARGS=$(getopt -o lirdv --long send-log,plex-library-id,force-refresh-metadata,dry-run,debug -- "$@")
+
+DEBUG_LEVEL_INFO=0
+DEBUG_LEVEL_DEBUG=1
+
 if [[ $? -ne 0 ]]; then
-    exit 1;
+    exit 1;w
 fi
 
 eval set -- "$VALID_ARGS"
 while [ : ]; do
-  case "$1" in
+  case "${1}" in
     -i | --plex-library-id)
         shift
-        echo "Querying plex server for '${plex_tv_shows_library_name}'"
-        echo -n "id: "
-        curl -sX GET "${plex_server_url}/library/sections/?X-Plex-Token=${plex_token}" | grep "${plex_tv_shows_library_name}" | grep -oP 'key="[0-9]+"' | grep -oP '".+"' | tr -d '"'
-        skip=1
+        debug ${DEBUG_LEVEL_INFO} "Querying plex server for '${PLEX_LIBRARY_NAME}'"
+        debug 'id: $(curl -sX GET "${PLEX_SERVER_URL}/library/sections/?X-Plex-Token=${PLEX_TOKEN}" | grep "${PLEX_LIBRARY_NAME}" | grep -oP 'key="[0-9]+"' | grep -oP '".+"' | tr -d "\"")'
+        QUERY_FLAG=1
+        ;;
+    -l | --send-log)
+        shift
+        OPT_SEND_LOG=1
         ;;
     -r | --force-refresh-metadata)
-        force_refresh_metadata=1
+        OPT_REFRESH_METADATA=1
+        shift
+        ;;
+    -d | --dry-run)
+        OPT_DRY_RUN=1
         shift
         ;;
     -v | --debug)
-        DEBUG=1
+        OPT_DEBUG=1
         shift;
         ;;
     --) shift;
@@ -61,8 +100,46 @@ while [ : ]; do
   esac
 done
 
-cr=1
-ac=""
+rotate_logs() {
+    logs=$(./logs/*)
+    echo "$logs"
+}
+
+SERIES_NAME="CBS Sunday Morning With Jane Pauley"
+SERIES_URL="https://www.cbsnews.com/sunday-morning/"
+
+DISCORD_WEBHOOK="$(cat discord_webhook.txt)"
+
+PLEX_SERVER_URL="http://plex.home"
+PLEX_LIBRARY_ID=2
+PLEX_LIBRARY_NAME="TV Shows"
+PLEX_LIBRARY_PATH="/mnt/media/tv"
+PLEX_SERIES_PATH="${PLEX_LIBRARY_PATH}/${SERIES_NAME}"
+PLEX_TOKEN_FILE="plex-token.txt"
+PLEX_TOKEN="$(cat $PLEX_TOKEN_FILE)"
+
+TVDB_URL="https://thetvdb.com/series/cbs-news-sunday-morning#seasons"
+
+VIDEO_FORMAT="mp4"
+
+#--------------------
+
+# Grabs the url to the full episode
+# returns https://www.cbsnews.com/video/sunday-morning-full-episode-10-22-2023/
+debug ${DEBUG_LEVEL_INFO} "Scraping for episode url from: '${SERIES_URL}'"
+episode_url="$(curl -s ${SERIES_URL} | grep -oP 'https://www.cbsnews.com/video/sunday-morning-full.*/')"
+episode_date_dashes="$(echo ${episode_url} |  grep -oP '[0-9][0-9][-][0-9][0-9][-][0-9][0-9][0-9][0-9]')"
+episode_date_slashes="${episode_date_dashes//-/\/}"
+episode_timestamp="$(to_timestamp $episode_date_slashes)"
+
+debug ${DEBUG_LEVEL_INFO} "Found full episode url: '${episode_url}'"
+debug ${DEBUG_LEVEL_DEBUG} "Finding match for date: '${episode_date_dashes}'"
+debug ${DEBUG_LEVEL_DEBUG} "Episode timetamp: '${episode_timestamp}'"
+
+# -----------------------
+
+#cr=1
+#ac=""
 read_dom () {
     local IFS=\>
     read -d \< ENTITY CONTENT
@@ -72,67 +149,69 @@ read_dom () {
     return $ret
 }
 
-get_month () {
-    if [[ "$1" == "January" ]]; then
+to_month_number () {
+    if [[ "${1}" == "January" ]]; then
         echo "01"
-    elif [[ "$1" == "February" ]]; then
+    elif [[ "${1}" == "February" ]]; then
         echo "02"
-    elif [[ "$1" == "March" ]]; then
+    elif [[ "${1}" == "March" ]]; then
         echo "03"
-    elif [[ "$1" == "April" ]]; then
+    elif [[ "${1}" == "April" ]]; then
         echo "04"
-    elif [[ "$1" == "May" ]]; then
+    elif [[ "${1}" == "May" ]]; then
         echo "05"
-    elif [[ "$1" == "June" ]]; then
+    elif [[ "${1}" == "June" ]]; then
         echo "06"
-    elif [[ "$1" == "July" ]]; then
+    elif [[ "${1}" == "July" ]]; then
         echo "07"
-    elif [[ "$1" == "August" ]]; then
+    elif [[ "${1}" == "August" ]]; then
         echo "08"
-    elif [[ "$1" == "September" ]]; then
+    elif [[ "${1}" == "September" ]]; then
         echo "09"
-    elif [[ "$1" == "October" ]]; then
+    elif [[ "${1}" == "October" ]]; then
         echo "10"
-    elif [[ "$1" == "November" ]]; then
+    elif [[ "${1}" == "November" ]]; then
         echo "11"
-    elif [[ "$1" == "December" ]]; then
+    elif [[ "${1}" == "December" ]]; then
         echo "12"
     fi
 }
 
 parse_series () {
-    if [[ "$TAG_NAME" == "table" ]] && [ "$intable" != 1 ]; then
+    if [[ "${TAG_NAME}" == "table" ]] && [ "${intable}" != 1 ]; then
         intable=1
-    elif [ "$intable" == 1 ]; then
-        if [[ "$TAG_NAME" == "/table" ]]; then
+    elif [ "${intable}" == 1 ]; then
+        if [[ "${TAG_NAME}" == "/table" ]]; then
             season=""
             intable=0
-        elif [[ "$TAG_NAME" == "tr" ]]; then
+        elif [[ "${TAG_NAME}" == "tr" ]]; then
             intr=1
             intd=0
-        elif [[ "$TAG_NAME" == "/tr" ]]; then
+        elif [[ "${TAG_NAME}" == "/tr" ]]; then
             intr=0
         fi
 
         if [ "$intr" == 1 ]; then
-            if [[ "$TAG_NAME" == "td" ]]; then
+            if [[ "${TAG_NAME}" == "td" ]]; then
                 intd=$((intd+1))
-            elif [ "$intd" == 1 ] && [[ "$TAG_NAME" == "a" ]]; then
-                season="$(echo "${CONTENT}" | grep -oP "Season[ ][0-9]*")"
-                link="$(echo $ATTRIBUTES | grep -oP 'href=\"[^\"]*\"' | grep -oP '\"https://.*\"' | tr -d '\"')"
+            elif [ "$intd" == 1 ] && [[ "${TAG_NAME}" == "a" ]]; then
+                check_season="$(echo "${CONTENT}" | grep -oP "Season[ ][0-9]*")"
+                check_season_url="$(echo ${ATTRIBUTES} | grep -oP 'href=\"[^\"]*\"' | grep -oP '\"https://.*\"' | tr -d '\"')"
             fi
 
-            if [ "$intd" == 2 ] && [ ! -z "$season" ]; then
-                date=$(echo "${CONTENT}" | grep -oP "[a-zA-Z]*[ ]*[0-9]*")
-                month=$(echo $date | grep -oP "[a-zA-Z]*")
-                year=$(echo $date | grep -oP "[0-9]*")
-                if [ ! -z "${month}" ]; then
-                    timestamp="$(to_timestamp "$(get_month $month)/01/$year")"
-                    if [ -z "$cur_timestamp" ] || [ "$timestamp" -gt "$cur_timestamp" ]; then
-                        if [ "$vid_timestamp" -gt "$timestamp" ]; then
-                            cur_timestamp="$timestamp"
-                            cur_link="$link"
-                            cur_season="$season"
+            if [ "$intd" == 2 ] && [ ! -z "${check_season}" ]; then
+                check_date=$(echo "${CONTENT}" | grep -oP "[a-zA-Z]*[ ]*[0-9]*")
+                check_month=$(echo "${check_date}" | grep -oP "[a-zA-Z]*")
+                check_year=$(echo "${check_date}" | grep -oP "[0-9]*")
+                if [ ! -z "${check_month}" ]; then
+                    check_timestamp="$(to_timestamp "$(to_month_number ${check_month})/01/${check_year}")"
+                    if [ -z "${match_timestamp}" ] || [ "${check_timestamp}" -gt "${match_timestamp}" ]; then
+                        debug ${DEBUG_LEVEL_DEBUG} "Found timestamp older than '${episode_timestamp}' > '${check_timestamp}(${check_month}/01/${check_year})'"
+                        if [ "${episode_timestamp}" -gt "${check_timestamp}" ]; then
+                            match_timestamp="${check_timestamp}"
+                            match_season_url="${check_season_url}"
+                            match_season="${check_season}"
+                            debug ${DEBUG_LEVEL_DEBUG} "Replaced older timestamp: '${match_timestamp}' '${match_season}' '${match_season_url}'"
                         fi
                     fi
                 fi
@@ -142,42 +221,40 @@ parse_series () {
 }
 
 parse_season () {
-    if [[ "$TAG_NAME" == "table" ]] && [ "$intable" != 1 ]; then
+    if [[ "${TAG_NAME}" == "table" ]] && [ "${intable}" != 1 ]; then
         intable=1
         intr=0
         intd=0
     fi
 
-    if [ "$intable" == 1 ]; then
-        if [[ "$TAG_NAME" == "/table" ]]; then
+    if [ "${intable}" == 1 ]; then
+        if [[ "${TAG_NAME}" == "/table" ]]; then
             intable=0
-        elif [[ "$TAG_NAME" == "tr" ]]; then
+        elif [[ "${TAG_NAME}" == "tr" ]]; then
             intr=1
             intd=0
-        elif [[ "$TAG_NAME" == "/tr" ]]; then
+        elif [[ "${TAG_NAME}" == "/tr" ]]; then
             intr=0
         fi
 
         if [ "$intr" == 1 ]; then
-            if [[ "$TAG_NAME" == "a" ]]; then
-                ep_name="$(echo ${CONTENT} | xargs)"
-                ep_date="$(echo ${ep_name} | grep -oP '[0-9]+/[0-9]+/[0-9]+')"
-                if [[ "${ep_date}" == "${vid_date}" ]]; then
-                    echo -n "matched to episode: "
-                    echo "${ep_name}"
-                    cur_season_ep="${season_ep}"
-                    cur_ep_name="${ep_name}"
+            if [[ "${TAG_NAME}" == "a" ]]; then
+                check_episode_name="$(echo ${CONTENT} | xargs | sed -e 's/\r//')"
+                check_episode_date="$(echo ${check_episode_name} | grep -oP '[0-9]+/[0-9]+/[0-9]+')"
+                if [[ "${check_episode_date}" == "${episode_date_slashes}" ]]; then
+                    matched_season_and_episode="${check_season_and_episode}"
+                    matched_episode_name="${check_episode_name}"
                 fi
-            elif [[ "$TAG_NAME" == "td" ]]; then
+            elif [[ "${TAG_NAME}" == "td" ]]; then
                 intd=$((intd+1))
-            elif [[ "$TAG_NAME" == "/td" ]]; then
+            elif [[ "${TAG_NAME}" == "/td" ]]; then
                 indiv=0
             fi
 
-            if [ "$intd" -eq 1 ] && [[ "$TAG_NAME" == "td" ]]; then
-                season_ep="$(echo ${CONTENT} | grep -oP 'S[0-9]+E[0-9]+')"
+            if [ "$intd" -eq 1 ] && [[ "${TAG_NAME}" == "td" ]]; then
+                check_season_and_episode="$(echo ${CONTENT} | grep -oP 'S[0-9]+E[0-9]+')"
             elif [ "$intd" -eq 2 ]; then
-                if [[ "$TAG_NAME" == "div" ]]; then
+                if [[ "${TAG_NAME}" == "div" ]]; then
                     indiv=$((indiv+1))
                 fi
             fi
@@ -185,57 +262,88 @@ parse_season () {
     fi
 }
 
-if [ -z "${skip}" ] || [ "${skip}" -ne 1 ]; then
+if [ "${QUERY_FLAG}" -ne 1 ]; then
+    debug ${DEBUG_LEVEL_INFO} "Attempting to scrape TVDB to match season/episode with episode's date..."
+    debug ${DEBUG_LEVEL_INFO} "Searching for season... "
     while read_dom; do
         parse_series
-    done  <<< "$(curl -s ${tvdb_url})"
+    done <<< "$(curl -s ${TVDB_URL})"
 
-    echo "Found episode season url: $cur_link"
-    if [ ! -z "${cur_link}" ]; then
-        while read_dom; do
-            parse_season
-        done  <<< "$(curl -s ${cur_link})"
+    if [ -z "${match_season_url}" ]; then
+        debug ${DEBUG_LEVEL_INFO} "ERROR: Could not find matching url for date: '${episode_date_dashes}'"
+        exit 1
     fi
 
-    echo "--------------"
-    dest="${tv_path}/${series_name}/${cur_season}/"
-    series_path="${tv_path}/${series_name}"
-    filename="${series_name} - ${cur_season_ep} - ${vid_date_parse////\-}"
-    full_path_template="${dest}/${filename}"
-    full_path="${full_path_template}.${vid_format}"
+    debug ${DEBUG_LEVEL_INFO} "Found url: '$match_season_url'"
+    debug ${DEBUG_LEVEL_INFO} "Searching for specific episode... "
 
-    echo "Filename: '${filename}'"
+    if [ ! -z "${match_season_url}" ]; then
+        while read_dom; do
+            parse_season
+        done  <<< "$(curl -s ${match_season_url})"
+    fi
 
-    if [ ! -d "${dest}" ]; then
-        echo "Destination location does not exist. Creating '${dest}'"
-        mkdir -p "${dest}"
+    if [ -z "${matched_episode_name}" ]; then
+        debug ${DEBUG_LEVEL_INFO} "ERROR: Could not find matching episode for date: '${episode_date_dashes}'"
+        exit 1
+    elif [ -z "${matched_season_and_episode}" ]; then
+        debug ${DEBUG_LEVEL_INFO} "ERROR: Could not find matching season_and_episode for date: '${episode_date_dashes}'"
+        exit 1
+    fi
+
+    debug ${DEBUG_LEVEL_INFO} "Found episode name: '${matched_episode_name}'"
+    debug ${DEBUG_LEVEL_INFO} "Using season/episode: '${matched_season_and_episode}'"
+
+    season_path="${PLEX_SERIES_PATH}/${match_season}"
+    base_filename="${SERIES_NAME} - ${matched_season_and_episode} - ${episode_date_dashes////\-}"
+    filename="${base_filename}.${VIDEO_FORMAT}"
+    full_path_template="${season_path}/${base_filename}"
+    full_path="${full_path_template}.${VIDEO_FORMAT}"
+
+    debug ${DEBUG_LEVEL_INFO} "Filename: '${base_filename}.${VIDEO_FORMAT}'"
+
+    if [ ! -d "${season_path}" ]; then
+        debug ${DEBUG_LEVEL_INFO} "Destination location does not exist. Creating '${season_path}'"
+        mkdir -p "${season_path}"
     fi
 
     if [[ ! -f "${full_path}" ]]; then
-        echo "Downloading from url: ${vid_url}"
-        debug "yt-dlp -f \"${vid_format}\" -o \"${dest}/${filename}.%(ext)s\" \"${vid_url}\""
-        ytdlp_status=$(yt-dlp -f "${vid_format}" -o "${dest}/${filename}.%(ext)s" "${vid_url}")
+        discord_msg "# New Episode Detected\nDownloading **${filename}**\n${episode_url}"
+        debug ${DEBUG_LEVEL_INFO} "Downloading from url: ${episode_url}"
+        debug ${DEBUG_LEVEL_DEBUG} "yt-dlp -o \"${full_path_template}.%(ext)s\" \"${episode_url}\""
+
+        if [ ${OPT_DRY_RUN} -eq 0 ]; then
+            echo "${OPT_DRY_RUN}"
+            ytdlp_status=$(yt-dlp -o "${full_path_template}.%(ext)s" "${episode_url}")
+        fi
 
         if [ $? -ne 0 ]; then
-            echo "An error has occured... printing log..."
-            echo "${ytdlp_status}"
-        elif [[ "${DEBUG}" -eq 1 ]]; then
-            echo "${ytdlp_status}"
+            debug ${DEBUG_LEVEL_INFO} "An error has occured... printing log..."
+            debug ${DEBUG_LEVEL_INFO} "${ytdlp_status}"
+            discord_file "${LOG_DIR}/${LOG_FILE}" "Attaching output file"
+            exit 1
+        else
+            debug ${DEBUG_LEVEL_DEBUG} "${ytdlp_status}"
         fi
 
         if [[ ! -z $(echo "${ytdlp_status}" || grep "${full_path_template} has already been downloaded") ]]; then
-            if [[ ! -z "${force_refresh_metadata}" && "${force_refresh_metadata}" -eq 1 ]]; then
-                debug "curl -sX GET \"${plex_server_url}/library/sections/${plex_tv_shows_library_id}/refresh?path=${series_path// /%20}&X-Plex-Token=${plex_token}\""
-                curl -sX GET "${plex_server_url}/library/sections/${plex_tv_shows_library_id}/refresh?path=${series_path// /%20}&X-Plex-Token=${plex_token}"
+            if [[ ! -z "${OPT_REFRESH_METADATA}" && "${OPT_REFRESH_METADATA}" -eq 1 ]]; then
+                debug ${DEBUG_LEVEL_DEBUG} "curl -sX GET \"${PLEX_SERVER_URL}/library/sections/${PLEX_LIBRARY_ID}/refresh?path=${PLEX_SERIES_PATH// /%20}&X-Plex-Token=${PLEX_TOKEN}\""
+                curl -sX GET "${PLEX_SERVER_URL}/library/sections/${PLEX_LIBRARY_ID}/refresh?path=${PLEX_SERIES_PATH// /%20}&X-Plex-Token=${PLEX_TOKEN}"
             fi
         else
-            echo "File created: ${filename}.${vid_format}"
-            echo -n "Refreshing metadata for series..."
-            debug "curl -sX GET \"${plex_server_url}/library/sections/${plex_tv_shows_library_id}/refresh?path=${series_path// /%20}&X-Plex-Token=${plex_token}\""
-            curl -sX GET "${plex_server_url}/library/sections/${plex_tv_shows_library_id}/refresh?path=${series_path// /%20}&X-Plex-Token=${plex_token}"
-            echo "DONE!"
+            debug ${DEBUG_LEVEL_INFO} "File created: ${base_filename}.${VIDEO_FORMAT}"
+            debug ${DEBUG_LEVEL_INFO} "Refreshing metadata for series..."
+            debug ${DEBUG_LEVEL_DEBUG} "curl -sX GET \"${PLEX_SERVER_URL}/library/sections/${PLEX_LIBRARY_ID}/refresh?path=${PLEX_SERIES_PATH// /%20}&X-Plex-Token=${PLEX_TOKEN}\""
+            curl -sX GET "${PLEX_SERVER_URL}/library/sections/${PLEX_LIBRARY_ID}/refresh?path=${PLEX_SERIES_PATH// /%20}&X-Plex-Token=${PLEX_TOKEN}"
+            debug ${DEBUG_LEVEL_INFO} "DONE!"
+            discord_msg "# Episode Imported\nEpisode has been downloaded and metadata refreshed\n**${filename}**"
         fi
     else
-        echo "File already exists: '${filename}'"
+        debug ${DEBUG_LEVEL_INFO} "File already exists: '${filename}'"
     fi
+fi
+
+if [ "${OPT_SEND_LOG}" -eq 1 ]; then
+    discord_file "${LOG_DIR}/${LOG_FILE}" "Attaching output file"
 fi
