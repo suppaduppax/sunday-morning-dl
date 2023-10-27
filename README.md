@@ -1,5 +1,5 @@
 # CBS Sunday Morning Downloader
-Automatically download the latest episode of [CBS Sunday Morning](https://www.cbsnews.com/sunday-morning/) using [yt-dlp](https://github.com/yt-dlp/yt-dlp).
+Automatically download the latest episode of [CBS Sunday Morning](https://www.cbsnews.com/sunday-morning/) using [yt-dlp](https://github.com/yt-dlp/yt-dlp) and add it to [plex](https://plex.tv).
 
 # Prerequisites
 ### Plex Token
